@@ -1,5 +1,6 @@
 """
 Tool tự động cày điểm danh dự quân đoàn Free Fire - Guest Account
+Phiên bản đã sửa lỗi hoàn chỉnh
 Yêu cầu: pip install playwright requests fake-useragent
 Và: playwright install chromium
 """
@@ -36,11 +37,18 @@ BASE_HEADERS = {
     "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 11; SM-G975F Build/RP1A.200720.012)"
 }
 
+# Chế độ an toàn khi không dùng proxy
+SAFE_MODE = True
+MAX_BOTS_NO_PROXY = 3
+DELAY_BETWEEN_MATCHES_NO_PROXY = (60, 120)
+
 # ==================== HÀM TIỆN ÍCH ====================
 def generate_device_id() -> str:
-    """Tạo device_id dạng IMEI 15 số + MAC ảo"""
+    """Tạo device_id dạng IMEI 15 số + MAC ảo - ĐÃ SỬA LỖI"""
     imei = ''.join(random.choices(string.digits, k=15))
-    mac = ':'.join(random.choices(string.hexdigits.upper(), k=12)[i:i+2] for i in range(0, 12, 2))
+    # Tạo MAC: 6 nhóm, mỗi nhóm 2 ký tự hex - CÁCH ĐÚNG
+    mac_groups = [''.join(random.choices(string.hexdigits.upper(), k=2)) for _ in range(6)]
+    mac = ':'.join(mac_groups)
     return f"{imei}_{mac}"
 
 def generate_signature(device_id: str, timestamp: int) -> str:
@@ -224,7 +232,6 @@ class FreeFireBot:
         """Chuyển đổi proxy string sang dict cho playwright"""
         if not self.proxy:
             return None
-        # Định dạng: http://user:pass@ip:port hoặc socks5://ip:port
         return {"server": self.proxy}
     
     def start_browser(self):
@@ -262,12 +269,10 @@ class FreeFireBot:
         """)
         
     def login_to_web(self) -> bool:
-        """Đăng nhập vào web Garena bằng token (nếu cần)"""
-        # Một số phiên bản web hỗ trợ đăng nhập qua token
+        """Đăng nhập vào web Garena bằng token"""
         try:
             self.page.goto("https://ff.garena.com/", timeout=30000)
             time.sleep(3)
-            # Thực hiện set localStorage token nếu có endpoint
             self.page.evaluate(f"""
                 localStorage.setItem('access_token', '{self.token}');
                 localStorage.setItem('uid', '{self.uid}');
@@ -293,10 +298,8 @@ class FreeFireBot:
     def start_classic_match(self) -> bool:
         """Vào chế độ Classic Battle Royale - Solo"""
         try:
-            # Đợi màn hình chính load
             time.sleep(random.uniform(2, 4))
             
-            # Click nút Battle Royale (các selector khả dĩ)
             br_selectors = [
                 "button:has-text('Battle Royale')",
                 "div:has-text('Battle Royale')",
@@ -309,7 +312,6 @@ class FreeFireBot:
             
             time.sleep(random.uniform(1, 2))
             
-            # Click Classic mode
             classic_selectors = [
                 "button:has-text('Classic')",
                 "div:has-text('Classic')",
@@ -321,7 +323,6 @@ class FreeFireBot:
             
             time.sleep(random.uniform(1, 2))
             
-            # Chọn Solo
             solo_selectors = [
                 "button:has-text('Solo')",
                 "div:has-text('Solo')",
@@ -331,7 +332,6 @@ class FreeFireBot:
             
             time.sleep(random.uniform(1, 2))
             
-            # Click nút Start
             start_selectors = [
                 "button:has-text('Start')",
                 "button:has-text('Bắt đầu')",
@@ -358,12 +358,10 @@ class FreeFireBot:
                 time.sleep(random.uniform(0.3, 0.8))
                 self.page.keyboard.up(key)
             else:
-                # Click random vị trí trên màn hình game
                 x = random.randint(100, 260)
                 y = random.randint(300, 580)
                 self.page.mouse.click(x, y)
             
-            # Đôi khi nhảy
             if random.random() < 0.3:
                 self.page.keyboard.press('Space')
                 
@@ -378,14 +376,11 @@ class FreeFireBot:
         print(f"[Bot {self.uid}] Bắt đầu treo máy trong {max_duration//60} phút")
         
         while time.time() - start_time < max_duration and self.running:
-            # Random di chuyển mỗi 30-60 giây
             if time.time() - last_move_time > random.uniform(30, 60):
                 self.random_move()
                 last_move_time = time.time()
             
-            # Kiểm tra xem trận đã kết thúc chưa
             try:
-                # Nếu có nút "Tiếp tục" hoặc "Continue" thì trận đã kết thúc
                 next_btn = self.page.query_selector("button:has-text('Tiếp tục'), button:has-text('Continue'), button:has-text('Next')")
                 if next_btn and next_btn.is_visible():
                     print(f"[Bot {self.uid}] Trận đã kết thúc")
@@ -402,7 +397,6 @@ class FreeFireBot:
         try:
             time.sleep(3)
             
-            # Click nút Tiếp tục
             next_selectors = [
                 "button:has-text('Tiếp tục')",
                 "button:has-text('Continue')",
@@ -413,7 +407,6 @@ class FreeFireBot:
                 print(f"[Bot {self.uid}] Đã nhận thưởng sau trận")
                 time.sleep(random.uniform(3, 5))
                 
-                # Click qua màn hình kết quả
                 ok_selectors = [
                     "button:has-text('OK')",
                     "button:has-text('Đồng ý')",
@@ -429,66 +422,61 @@ class FreeFireBot:
     
     def get_current_honor(self) -> int:
         """Lấy điểm danh dự hiện tại qua API"""
-        return get_honor_points(self.uid, self.token, self._proxy_dict())
-    
-    def _proxy_dict(self) -> Optional[Dict]:
-        if self.proxy:
-            return {"http": self.proxy, "https": self.proxy}
-        return None
+        proxy_dict = {"http": self.proxy, "https": self.proxy} if self.proxy else None
+        return get_honor_points(self.uid, self.token, proxy_dict)
     
     def check_token_alive(self) -> bool:
         """Kiểm tra token còn sống không"""
-        info = get_guild_info(self.uid, self.token, self._proxy_dict())
+        proxy_dict = {"http": self.proxy, "https": self.proxy} if self.proxy else None
+        info = get_guild_info(self.uid, self.token, proxy_dict)
         return info is not None
     
     def refresh_token_if_needed(self) -> bool:
         """Làm mới token nếu cần"""
         if not self.check_token_alive():
             print(f"[Bot {self.uid}] Token hết hạn, đang refresh...")
-            new_token = refresh_guest_token(self.refresh_token, self.device_id, self._proxy_dict())
+            proxy_dict = {"http": self.proxy, "https": self.proxy} if self.proxy else None
+            new_token = refresh_guest_token(self.refresh_token, self.device_id, proxy_dict)
             if new_token:
                 self.token = new_token
                 print(f"[Bot {self.uid}] Đã refresh token thành công")
                 return True
             else:
                 print(f"[Bot {self.uid}] Refresh thất bại, tạo guest mới...")
-                new_account = create_guest_account(self._proxy_dict())
+                new_account = create_guest_account(proxy_dict)
                 if new_account:
                     self.uid = new_account['uid']
                     self.token = new_account['guest_token']
                     self.refresh_token = new_account.get('refresh_token')
                     self.device_id = new_account.get('device_id')
-                    # Join lại guild
-                    join_guild(self.uid, self.token, self.guild_id, self._proxy_dict())
+                    join_guild(self.uid, self.token, self.guild_id, proxy_dict)
                     return True
         return False
     
     def ensure_in_guild(self) -> bool:
         """Đảm bảo tài khoản đã ở trong guild mục tiêu"""
-        info = get_guild_info(self.uid, self.token, self._proxy_dict())
+        proxy_dict = {"http": self.proxy, "https": self.proxy} if self.proxy else None
+        info = get_guild_info(self.uid, self.token, proxy_dict)
         
         if info and info.get('guild_id') == self.guild_id:
             return True
         
         print(f"[Bot {self.uid}] Chưa ở guild {self.guild_id}, đang join...")
-        return join_guild(self.uid, self.token, self.guild_id, self._proxy_dict())
+        return join_guild(self.uid, self.token, self.guild_id, proxy_dict)
     
     def farm_loop(self, target_matches: int = 10):
         """Vòng lặp cày điểm chính"""
         self.start_browser()
         
         try:
-            # Đăng nhập web
             if not self.login_to_web():
                 print(f"[Bot {self.uid}] Không thể đăng nhập web, thoát")
                 return
             
-            # Đảm bảo đã join guild
             if not self.ensure_in_guild():
                 print(f"[Bot {self.uid}] Không thể join guild {self.guild_id}")
                 return
             
-            # Lấy điểm ban đầu
             initial_honor = self.get_current_honor()
             print(f"[Bot {self.uid}] Điểm danh dự ban đầu: {initial_honor}")
             
@@ -496,26 +484,21 @@ class FreeFireBot:
                 if not self.running:
                     break
                 
-                # Kiểm tra token
                 self.refresh_token_if_needed()
                 
                 match_start = datetime.now()
                 print(f"[Bot {self.uid}] === Bắt đầu trận {match + 1}/{target_matches} ===")
                 
-                # Vào trận
                 if not self.start_classic_match():
                     print(f"[Bot {self.uid}] Không thể vào trận, thử lại...")
                     time.sleep(10)
                     continue
                 
-                # Treo máy trong trận (15-20 phút)
                 match_duration = random.randint(15, 20) * 60
                 self.idle_in_match(max_duration=match_duration)
                 
-                # Xử lý kết thúc trận
                 self.handle_match_end()
                 
-                # Cập nhật điểm
                 time.sleep(5)
                 current_honor = self.get_current_honor()
                 honor_gained = current_honor - initial_honor
@@ -526,10 +509,15 @@ class FreeFireBot:
                 match_end = datetime.now()
                 self._log_match(match + 1, match_start, match_end, honor_gained, current_honor)
                 
-                # Chờ giữa các trận
-                wait_time = random.uniform(10, 20)
-                print(f"[Bot {self.uid}] Chờ {wait_time:.1f} giây trước trận tiếp theo")
-                time.sleep(wait_time)
+                # Chế độ an toàn khi không có proxy
+                if SAFE_MODE and not self.proxy:
+                    wait_time = random.uniform(60, 120)
+                    print(f"[Bot {self.uid}] Chế độ an toàn (không proxy): chờ {wait_time:.1f} giây")
+                    time.sleep(wait_time)
+                else:
+                    wait_time = random.uniform(10, 20)
+                    print(f"[Bot {self.uid}] Chờ {wait_time:.1f} giây trước trận tiếp theo")
+                    time.sleep(wait_time)
                 
         except Exception as e:
             print(f"[Bot {self.uid}] Lỗi trong farm loop: {e}")
@@ -566,10 +554,15 @@ class MultiBotManager:
         """Tạo các guest account và khởi tạo bot"""
         print(f"[*] Đang tạo {self.num_bots} guest account...")
         
+        # Cảnh báo nếu không có proxy mà số bot vượt quá giới hạn
+        if not self.proxy_list and self.num_bots > MAX_BOTS_NO_PROXY:
+            print(f"[!] CẢNH BÁO: Đang chạy {self.num_bots} bot trên 1 IP, khuyến nghị tối đa {MAX_BOTS_NO_PROXY} bot")
+            print("[!] Tiếp tục trong 5 giây (Ctrl+C để hủy)...")
+            time.sleep(5)
+        
         for i in range(self.num_bots):
             proxy = self.proxy_list[i % len(self.proxy_list)] if self.proxy_list else None
             
-            # Tạo guest account
             proxy_dict = {"http": proxy, "https": proxy} if proxy else None
             account = create_guest_account(proxy_dict)
             
@@ -577,7 +570,6 @@ class MultiBotManager:
                 print(f"[!] Không thể tạo guest account cho bot {i+1}")
                 continue
             
-            # Join guild
             join_guild(account['uid'], account['guest_token'], self.guild_id, proxy_dict)
             
             bot = FreeFireBot(account, self.guild_id, proxy, headless=True)
@@ -607,15 +599,14 @@ class MultiBotManager:
                 except Exception as e:
                     print(f"[!] Lỗi bot: {e}")
         
-        # Tổng kết
-        print("\n[*] ========== TỔNG KẾT ==========")
         total_matches = sum(b.match_count for b in self.bots)
         total_honor = sum(b.total_honor for b in self.bots)
+        
+        print("\n[*] ========== TỔNG KẾT ==========")
         print(f"[*] Tổng số trận đã chạy: {total_matches}")
         print(f"[*] Tổng điểm danh dự nhận được: {total_honor}")
         print(f"[*] Trung bình mỗi bot: {total_honor//len(self.bots) if self.bots else 0} điểm")
         
-        # Lưu tổng kết
         with open("farming_summary.txt", "w", encoding="utf-8") as f:
             f.write(f"Guild ID: {self.guild_id}\n")
             f.write(f"Số bot: {len(self.bots)}\n")
@@ -650,7 +641,7 @@ def main():
     proxy_list = []
     
     if use_proxy:
-        proxy_file = input("Nhập đường dẫn file proxy (mỗi dòng một proxy, định dạng http://ip:port hoặc socks5://ip:port): ")
+        proxy_file = input("Nhập đường dẫn file proxy (mỗi dòng một proxy): ")
         try:
             with open(proxy_file, 'r') as f:
                 proxy_list = [line.strip() for line in f if line.strip()]
